@@ -14,6 +14,8 @@ export default function Shipment() {
   const [quantity, setQuantity] = useState('');
   const [type, setType] = useState('Single');
   const [groupID, setGroupID] = useState('');
+  const [showAddToGroupModal, setShowAddToGroupModal] = useState(false);
+  const [targetShipment, setTargetShipment] = useState(null);
   
   // Multi shipment Excel upload states
   const [excelData, setExcelData] = useState([]);
@@ -26,12 +28,15 @@ export default function Shipment() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
   
   // Dropdown options
   const [materials, setMaterials] = useState([]);
   const [transporters, setTransporters] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [dropdownsLoading, setDropdownsLoading] = useState(true);
+  const [availableGroupIDs, setAvailableGroupIDs] = useState([]);
+  const [availableShipments, setAvailableShipments] = useState([]);
   
   const observer = useRef();
   const fetchedPages = useRef(new Set());
@@ -52,15 +57,19 @@ export default function Shipment() {
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
-        const [materialsRes, transportersRes, vehicleTypesRes] = await Promise.all([
+        const [materialsRes, transportersRes, vehicleTypesRes, groupIDsRes, shipmentsRes] = await Promise.all([
           materialAPI.getAll({ limit: 1000 }),
           transporterAPI.getAll({ limit: 1000 }),
-          vehicleTypeAPI.getAll({ limit: 1000 })
+          vehicleTypeAPI.getAll({ limit: 1000 }),
+          shipmentAPI.getAllGroupIDs(),
+          shipmentAPI.getShipmentsForSelection()
         ]);
         
         setMaterials(materialsRes?.data?.data || []);
         setTransporters(transportersRes?.data?.data || []);
         setVehicleTypes(vehicleTypesRes?.data?.data || []);
+        setAvailableGroupIDs(Array.isArray(groupIDsRes?.data?.data) ? groupIDsRes.data.data : (Array.isArray(groupIDsRes?.data) ? groupIDsRes.data : []));
+        setAvailableShipments(Array.isArray(shipmentsRes?.data?.data) ? shipmentsRes.data.data : (Array.isArray(shipmentsRes?.data) ? shipmentsRes.data : []));
       } catch (error) {
         console.error('Error fetching dropdown data:', error);
       } finally {
@@ -80,7 +89,7 @@ export default function Shipment() {
       setLoading(true);
       
       try {
-        const response = await shipmentAPI.getAll({ page: currentPage, limit: 10 });
+        const response = await shipmentAPI.getAll({ page: currentPage, limit: 10, grouped: true });
         
         if (response?.data?.data) {
           setShipments(prev => [...prev, ...response.data.data]);
@@ -100,7 +109,7 @@ export default function Shipment() {
     };
 
     fetchShipments();
-  }, [currentPage]);
+  }, [currentPage, hasMore, loading]);
 
   // Reset form fields
   const resetForm = () => {
@@ -118,6 +127,8 @@ export default function Shipment() {
     setShowForm(false);
     setExcelData([]);
     setShowExcelPreview(false);
+    setShowAddToGroupModal(false);
+    setTargetShipment(null);
   };
 
   // Download sample Excel template
@@ -198,6 +209,75 @@ export default function Shipment() {
     );
   };
 
+  // Toggle expand/collapse for grouped shipments
+  const toggleGroupExpansion = (groupID) => {
+    setExpandedGroups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupID)) {
+        newSet.delete(groupID);
+      } else {
+        newSet.add(groupID);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle add to group button click
+  const handleAddToGroup = (shipment) => {
+    setTargetShipment(shipment);
+    setShowAddToGroupModal(true);
+  };
+
+  // Handle add shipment to existing shipment/group
+  const handleAddShipmentToGroup = async (e) => {
+    e.preventDefault();
+    setFormLoading(true);
+    
+    try {
+      const shipmentData = {
+        source,
+        destination,
+        transporterID,
+        vehicleTypeID,
+        material,
+        totalWeight: parseFloat(totalWeight),
+        volume: parseFloat(volume),
+        quantity: parseInt(quantity)
+      };
+
+      if (targetShipment.isGrouped) {
+        // Add to existing group
+        shipmentData.groupID = targetShipment.groupID;
+        await shipmentAPI.addToGroup(shipmentData);
+        alert('Shipment added to group successfully!');
+      } else {
+        // Convert Single shipment to Multi and add new one
+        const newGroupID = `GRP_${Date.now()}`;
+        
+        // Convert the target shipment to Multi
+        await shipmentAPI.convertToMulti(targetShipment._id, newGroupID);
+        
+        // Add the new shipment with same group ID
+        shipmentData.groupID = newGroupID;
+        await shipmentAPI.addToGroup(shipmentData);
+        alert('Shipments grouped successfully!');
+      }
+      
+      // Refresh the shipments list
+      setShipments([]);
+      setCurrentPage(1);
+      fetchedPages.current.clear();
+      setHasMore(true);
+      
+      resetForm();
+    } catch (error) {
+      console.error('Error adding shipment to group:', error);
+      alert(error.response?.data?.message || 'Failed to add shipment to group');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
   // Handle bulk shipment creation from Excel
   const handleBulkCreate = async () => {
     // Validate all rows have required fields
@@ -263,7 +343,7 @@ export default function Shipment() {
         quantity: parseInt(quantity),
         type
       };
-      
+
       if (type === 'Multi' && groupID) {
         shipmentData.groupID = groupID;
       }
@@ -271,13 +351,18 @@ export default function Shipment() {
       const response = await shipmentAPI.create(shipmentData);
       
       if (response?.data) {
-        setShipments(prev => [response.data, ...prev]);
-        resetForm();
-        alert('Shipment created successfully!');
+        // Refresh the shipments list
+        setShipments([]);
+        setCurrentPage(1);
+        fetchedPages.current.clear();
+        setHasMore(true);
       }
+      
+      resetForm();
+      alert('Shipment created successfully!');
     } catch (error) {
       console.error('Error creating shipment:', error);
-      alert('Failed to create shipment');
+      alert(error.response?.data?.message || 'Failed to create shipment');
     } finally {
       setFormLoading(false);
     }
@@ -697,6 +782,7 @@ export default function Shipment() {
           <table className="Shipment-data-table">
             <thead>
               <tr>
+                <th>Expand</th>
                 <th>Source</th>
                 <th>Destination</th>
                 <th>Material</th>
@@ -713,29 +799,103 @@ export default function Shipment() {
             <tbody>
               {shipments.map((shipment, index) => {
                 const isLastElement = shipments.length === index + 1;
+                const isGrouped = shipment.isGrouped;
+                const isExpanded = expandedGroups.has(shipment.groupID);
                 
                 return (
-                  <tr
-                    ref={isLastElement ? lastShipmentRef : null}
-                    key={shipment._id}
-                  >
-                    <td>{shipment.source}</td>
-                    <td>{shipment.destination}</td>
-                    <td>{shipment.material}</td>
-                    <td>{getTransporterName(shipment.transporterID)}</td>
-                    <td>{getVehicleTypeName(shipment.vehicleTypeID)}</td>
-                    <td>{shipment.totalWeight}</td>
-                    <td>{shipment.volume}</td>
-                    <td>{shipment.quantity}</td>
-                    <td>{shipment.type}</td>
-                    <td>{shipment.groupID || '-'}</td>
-                    <td>
-                      <div className="Shipment-action-buttons">
-                        <button className="Shipment-edit-button" onClick={() => handleEdit(shipment)}>Edit</button>
-                        <button className="Shipment-delete-button" onClick={() => handleDelete(shipment._id)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
+                  <>
+                    <tr
+                      ref={isLastElement ? lastShipmentRef : null}
+                      key={shipment._id || shipment.groupID}
+                      style={{ 
+                        backgroundColor: isGrouped ? '#f0f8ff' : 'transparent',
+                        fontWeight: isGrouped ? 'bold' : 'normal'
+                      }}
+                    >
+                      <td>
+                        {isGrouped && (
+                          <button 
+                            onClick={() => toggleGroupExpansion(shipment.groupID)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: '18px',
+                              padding: '5px 10px'
+                            }}
+                          >
+                            {isExpanded ? '▼' : '▶'}
+                          </button>
+                        )}
+                      </td>
+                      <td>{shipment.source}</td>
+                      <td>{shipment.destination}</td>
+                      <td>{shipment.material}</td>
+                      <td>{getTransporterName(shipment.transporterID)}</td>
+                      <td>{getVehicleTypeName(shipment.vehicleTypeID)}</td>
+                      <td>{shipment.totalWeight.toFixed(2)}</td>
+                      <td>{shipment.volume.toFixed(2)}</td>
+                      <td>{shipment.quantity}</td>
+                      <td>{shipment.type}{isGrouped ? ` (${shipment.itemCount} items)` : ''}</td>
+                      <td>{shipment.groupID || '-'}</td>
+                      <td>
+                        <div className="Shipment-action-buttons">
+                          {!isGrouped && (
+                            <>
+                              <button className="Shipment-edit-button" onClick={() => handleEdit(shipment)}>Edit</button>
+                              <button className="Shipment-delete-button" onClick={() => handleDelete(shipment._id)}>Delete</button>
+                            </>
+                          )}
+                          <button 
+                            className="Shipment-add-to-group-button" 
+                            onClick={() => handleAddToGroup(shipment)}
+                            title={isGrouped ? 'Add to this group' : 'Group with this shipment'}
+                            style={{
+                              padding: '8px 12px',
+                              backgroundColor: '#4CAF50',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '16px',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    
+                    {/* Render individual items if group is expanded */}
+                    {isGrouped && isExpanded && shipment.items && shipment.items.map((item) => (
+                      <tr 
+                        key={item._id}
+                        style={{ 
+                          backgroundColor: '#f9f9f9',
+                          fontSize: '0.9em'
+                        }}
+                      >
+                        <td style={{ paddingLeft: '30px' }}>└─</td>
+                        <td>{item.source}</td>
+                        <td>{item.destination}</td>
+                        <td>{item.material}</td>
+                        <td>{getTransporterName(item.transporterID)}</td>
+                        <td>{getVehicleTypeName(item.vehicleTypeID)}</td>
+                        <td>{item.totalWeight.toFixed(2)}</td>
+                        <td>{item.volume.toFixed(2)}</td>
+                        <td>{item.quantity}</td>
+                        <td>{item.type}</td>
+                        <td>{item.groupID || '-'}</td>
+                        <td>
+                          <div className="Shipment-action-buttons">
+                            <button className="Shipment-edit-button" onClick={() => handleEdit(item)}>Edit</button>
+                            <button className="Shipment-delete-button" onClick={() => handleDelete(item._id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
                 );
               })}
             </tbody>
@@ -751,6 +911,171 @@ export default function Shipment() {
       
       {shipments.length === 0 && !loading && (
         <div className="Shipment-empty-message">No shipments found</div>
+      )}
+
+      {/* Add to Group Modal */}
+      {showAddToGroupModal && targetShipment && (
+        <div className="Shipment-modal-overlay" onClick={() => setShowAddToGroupModal(false)}>
+          <div className="Shipment-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="Shipment-modal-header">
+              <h3>
+                {targetShipment.isGrouped 
+                  ? `Add Shipment to Group: ${targetShipment.groupID}`
+                  : `Group with Shipment`
+                }
+              </h3>
+              <button 
+                className="Shipment-modal-close"
+                onClick={() => setShowAddToGroupModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#666'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="Shipment-modal-body">
+              {!targetShipment.isGrouped && (
+                <div style={{ padding: '10px', backgroundColor: '#fff3e0', borderRadius: '5px', marginBottom: '15px' }}>
+                  <strong>Note:</strong> This will create a new group with the selected shipment and your new shipment.
+                </div>
+              )}
+              
+              <div style={{ padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '5px', marginBottom: '15px' }}>
+                <strong>Target Shipment:</strong><br/>
+                {targetShipment.source} → {targetShipment.destination} | {targetShipment.material} | {targetShipment.totalWeight}kg
+              </div>
+
+              <form onSubmit={handleAddShipmentToGroup}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px' }}>
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Source *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="text"
+                      value={source}
+                      onChange={(e) => setSource(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Destination *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="text"
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Material *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="text"
+                      value={material}
+                      onChange={(e) => setMaterial(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Transporter *</label>
+                    <select
+                      className="Shipment-field-select"
+                      value={transporterID}
+                      onChange={(e) => setTransporterID(e.target.value)}
+                      required
+                    >
+                      <option value="">Select Transporter</option>
+                      {transporters.map(transporter => (
+                        <option key={transporter._id} value={transporter._id}>
+                          {transporter.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Vehicle Type *</label>
+                    <select
+                      className="Shipment-field-select"
+                      value={vehicleTypeID}
+                      onChange={(e) => setVehicleTypeID(e.target.value)}
+                      required
+                    >
+                      <option value="">Select Vehicle Type</option>
+                      {vehicleTypes.map(vehicleType => (
+                        <option key={vehicleType._id} value={vehicleType._id}>
+                          {vehicleType.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Weight (KG) *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="number"
+                      step="0.01"
+                      value={totalWeight}
+                      onChange={(e) => setTotalWeight(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Volume (CFT) *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="number"
+                      step="0.01"
+                      value={volume}
+                      onChange={(e) => setVolume(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="Shipment-field-group">
+                    <label className="Shipment-field-label">Quantity *</label>
+                    <input
+                      className="Shipment-field-input"
+                      type="number"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                
+                <div className="Shipment-modal-footer">
+                  <button 
+                    className="Shipment-submit-button" 
+                    type="submit" 
+                    disabled={formLoading}
+                  >
+                    {formLoading ? 'Adding...' : 'Add to Group'}
+                  </button>
+                  <button 
+                    className="Shipment-cancel-button" 
+                    type="button" 
+                    onClick={() => setShowAddToGroupModal(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

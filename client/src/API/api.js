@@ -43,7 +43,13 @@ export const shipmentAPI = {
   create: (shipmentData) => apiClient.post('/shipments', shipmentData),
 
   // Get all shipments
-  getAll: () => apiClient.get('/shipments'),
+  getAll: (params = {}) => apiClient.get('/shipments', { params }),
+
+  // Get all unique group IDs
+  getAllGroupIDs: () => apiClient.get('/shipments/group-ids/all'),
+
+  // Get shipments for selection
+  getShipmentsForSelection: () => apiClient.get('/shipments/selection/all'),
 
   // Get shipments by route
   getByRoute: (source, destination) => 
@@ -68,6 +74,12 @@ export const shipmentAPI = {
 
   // Delete shipment
   delete: (id) => apiClient.delete(`/shipments/${id}`),
+
+  // Convert Single to Multi
+  convertToMulti: (id, groupID) => apiClient.patch(`/shipments/${id}/convert-to-multi`, { groupID }),
+
+  // Add to existing group
+  addToGroup: (shipmentData) => apiClient.post('/shipments/add-to-group', shipmentData),
 };
 
 

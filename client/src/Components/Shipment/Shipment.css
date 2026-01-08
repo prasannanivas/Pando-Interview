@@ -465,3 +465,95 @@
   font-size: 16px;
   color: #999;
 }
+
+/* Grouped Shipment Styles */
+.Shipment-data-table tbody tr[style*="f0f8ff"] {
+  border-left: 3px solid #226f0aff;
+}
+
+.Shipment-data-table tbody tr[style*="f9f9f9"] {
+  border-left: 3px solid #ccc;
+}
+
+.Shipment-expand-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 5px 10px;
+  color: #226f0aff;
+  transition: transform 0.2s;
+}
+
+.Shipment-expand-button:hover {
+  transform: scale(1.1);
+}
+
+/* Modal Styles */
+.Shipment-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.Shipment-modal-content {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.Shipment-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.Shipment-modal-header h3 {
+  margin: 0;
+  color: #333;
+  font-size: 20px;
+}
+
+.Shipment-modal-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #666;
+  transition: color 0.2s;
+}
+
+.Shipment-modal-close:hover {
+  color: #333;
+}
+
+.Shipment-modal-body {
+  padding: 20px;
+}
+
+.Shipment-modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.Shipment-add-to-group-button:hover {
+  background-color: #45a049 !important;
+  transform: scale(1.05);
+}
