@@ -34,7 +34,7 @@ class ShipmentValidation {
       material: Joi.string().trim(),
       quantity: Joi.number().integer().positive(),
       type: Joi.string().valid('Single', 'Multi'),
-      groupID: Joi.string().trim()
+      groupID: Joi.string().trim().allow('')
     }).min(1);
   }
 
